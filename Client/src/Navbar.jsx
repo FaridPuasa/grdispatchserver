@@ -19,7 +19,16 @@ export default function Navbar() {
 
   return (
     <div className="h-16 bg-white border-b border-gray-200 flex items-center px-4 relative z-40 shrink-0">
-      <div className="flex-1" />
+      <div className="flex-1 flex items-center">
+        <a
+          href="https://portal.gorushbn.com/"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-sm font-medium text-gray-600 hover:text-blue-600 transition-colors"
+        >
+          Portal
+        </a>
+      </div>
 
       <div className="flex items-center justify-center">
         <img
