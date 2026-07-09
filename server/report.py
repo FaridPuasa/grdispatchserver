@@ -1,4 +1,5 @@
 import io
+import os
 from datetime import date, timedelta
 
 from reportlab.graphics.charts.barcharts import HorizontalBarChart, VerticalBarChart
@@ -9,6 +10,7 @@ from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
+from reportlab.lib.utils import ImageReader
 from reportlab.platypus import (
     PageBreak,
     Paragraph,
@@ -19,6 +21,21 @@ from reportlab.platypus import (
 )
 
 from metrics import COMPLETED_STATUS, last_entry_time
+
+LOGO_PATH = os.path.join(os.path.dirname(__file__), "logo.png")
+HEADER_LOGO_HEIGHT = 12 * mm
+
+
+def _draw_header(canvas, doc):
+    if not os.path.exists(LOGO_PATH):
+        return
+    logo = ImageReader(LOGO_PATH)
+    image_width, image_height = logo.getSize()
+    height = HEADER_LOGO_HEIGHT
+    width = height * image_width / image_height
+    x = (A4[0] - width) / 2
+    y = A4[1] - 10 * mm - height
+    canvas.drawImage(LOGO_PATH, x, y, width=width, height=height, preserveAspectRatio=True, mask="auto")
 
 BRAND_BLUE_HEX = "#2563EB"
 PURPLE_HEX = "#7C3AED"
@@ -291,7 +308,7 @@ def generate_report_pdf(dispatcher_names, dispatcher_data, summary, orders, star
     doc = SimpleDocTemplate(
         buffer,
         pagesize=A4,
-        topMargin=20 * mm,
+        topMargin=32 * mm,
         bottomMargin=20 * mm,
         leftMargin=18 * mm,
         rightMargin=18 * mm,
@@ -344,5 +361,5 @@ def generate_report_pdf(dispatcher_names, dispatcher_data, summary, orders, star
         story.append(Paragraph("Completion Gaps", SUBHEADING_STYLE))
         story.append(_gaps_paragraph(score_data.get("completion_gaps")))
 
-    doc.build(story)
+    doc.build(story, onFirstPage=_draw_header, onLaterPages=_draw_header)
     return buffer.getvalue()
