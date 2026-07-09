@@ -5,9 +5,18 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from flask import Flask, Response, jsonify, request
+from flask import Flask, Response, g, jsonify, request
 from flask_cors import CORS
 
+from auth import (
+    ALLOWED_EMAILS,
+    create_session,
+    delete_session,
+    get_users_collection,
+    public_user,
+    require_auth,
+    verify_password,
+)
 from db import get_client, get_collection
 from metrics import compute_productivity
 from forecasting import check_dispatcher_model, forecast_dispatcher
@@ -63,7 +72,41 @@ def health():
         return {"status": "unhealthy", "error": str(exc)}, 503
 
 
+@app.post("/api/auth/login")
+def login():
+    body = request.get_json(silent=True) or {}
+    email = (body.get("email") or "").strip().lower()
+    password = body.get("password") or ""
+
+    if not email or not password:
+        return jsonify({"error": "email and password are required"}), 400
+
+    if email not in ALLOWED_EMAILS:
+        return jsonify({"error": "invalid email or password"}), 401
+
+    user = get_users_collection().find_one({"email": email})
+    if not user or not verify_password(password, user.get("password")):
+        return jsonify({"error": "invalid email or password"}), 401
+
+    session_id = create_session(user)
+    return jsonify({"token": session_id, "user": public_user(user)})
+
+
+@app.get("/api/auth/me")
+@require_auth
+def me():
+    return jsonify({"user": g.current_user})
+
+
+@app.post("/api/auth/logout")
+@require_auth
+def logout():
+    delete_session(g.session_id)
+    return jsonify({"status": "logged out"})
+
+
 @app.post("/api/productivity")
+@require_auth
 def productivity():
     body = request.get_json(silent=True) or {}
     database_name = body.get("database_name")
@@ -120,6 +163,7 @@ def productivity():
 
 
 @app.post("/api/export-report")
+@require_auth
 def export_report():
     body = request.get_json(silent=True) or {}
     database_name = body.get("database_name")
@@ -152,7 +196,7 @@ def export_report():
         report_orders = [o for o in orders if o.get("assignedTo") not in EXCLUDED_DISPATCHERS]
 
     summary = build_summary(report_orders, database_name, collection_name, start_date, end_date)
-    pdf_bytes = generate_report_pdf(dispatcher_names, data, summary)
+    pdf_bytes = generate_report_pdf(dispatcher_names, data, summary, report_orders, start_date, end_date)
 
     return Response(
         pdf_bytes,
@@ -164,6 +208,7 @@ def export_report():
 
 
 @app.post("/api/tracking-lookup")
+@require_auth
 def tracking_lookup():
     body = request.get_json(silent=True) or {}
     tracking_number = body.get("tracking_number")
@@ -192,6 +237,7 @@ def tracking_lookup():
 
 
 @app.post("/api/build-prediction-models")
+@require_auth
 def build_prediction_models():
     body = request.get_json(silent=True) or {}
     database_name = body.get("database_name")
@@ -218,6 +264,7 @@ def build_prediction_models():
 
 
 @app.post("/api/custom-prediction")
+@require_auth
 def custom_prediction():
     body = request.get_json(silent=True) or {}
     dispatcher = body.get("dispatcher")
@@ -241,6 +288,7 @@ def custom_prediction():
 
 
 @app.post("/api/scenario-analysis")
+@require_auth
 def scenario_analysis():
     body = request.get_json(silent=True) or {}
     dispatcher = body.get("dispatcher")

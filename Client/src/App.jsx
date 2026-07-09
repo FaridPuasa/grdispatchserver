@@ -2,8 +2,12 @@ import React from 'react'
 import { useState, useEffect } from 'react';
 import { Calendar, Search, Filter, TrendingUp, Calculator, Package, Clock, AlertTriangle, Users, TrendingDown, Settings, BarChart3, Activity, Database, ChevronDown, ChevronUp, Menu, X, MapPin, User, Truck, Eye, EyeOff, Warehouse, FileDown } from 'lucide-react';
 import { LineChart, XAxis, YAxis, CartesianGrid, Tooltip, Legend, Line, ResponsiveContainer, Bar } from 'recharts';
+import { useAuth } from './AuthContext.jsx';
+import Login from './Login.jsx';
+import Navbar from './Navbar.jsx';
 
 const App = () => {
+  const { user, checkingSession, authFetch, API_BASE_URL } = useAuth();
   const [data, setData] = useState({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -68,11 +72,6 @@ const [filters, setFilters] = useState({
 });
 const [exportSelection, setExportSelection] = useState({ mode: 'all', selected: [] });
 const [exporting, setExporting] = useState(false);
-
-  // Relative by default so the Vite dev proxy (see vite.config.ts) or same-origin
-  // production hosting handles routing; override with VITE_API_BASE_URL if the API
-  // is deployed on a different origin than the client.
-  const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
 
 
   const generateDispatcherChart = (dispatcherName, scoreData) => {
@@ -480,7 +479,7 @@ const buildPredictionModels = async () => {
 
   setBuildingModels(true);
   try {
-    const response = await fetch(`${API_BASE_URL}/api/build-prediction-models`, {
+    const response = await authFetch(`${API_BASE_URL}/api/build-prediction-models`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -516,7 +515,7 @@ const buildPredictionModels = async () => {
 
 const predictPerformance = async (dispatcherName, monthsAhead = 3) => {
   try {
-    const response = await fetch(`${API_BASE_URL}/api/custom-prediction`, {
+    const response = await authFetch(`${API_BASE_URL}/api/custom-prediction`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -580,7 +579,7 @@ const runCustomPrediction = async () => {
   setCustomPrediction(prev => ({ ...prev, loading: true, results: null }));
   
   try {
-    const response = await fetch(`${API_BASE_URL}/api/custom-prediction`, {
+    const response = await authFetch(`${API_BASE_URL}/api/custom-prediction`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -666,7 +665,7 @@ useEffect(() => {
 
     try {
       // Fetch productivity data
-      const response = await fetch(`${API_BASE_URL}/api/productivity`, {
+      const response = await authFetch(`${API_BASE_URL}/api/productivity`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -718,7 +717,7 @@ useEffect(() => {
     setError('');
     try {
       const dispatchers = exportSelection.mode === 'all' ? 'all' : exportSelection.selected;
-      const response = await fetch(`${API_BASE_URL}/api/export-report`, {
+      const response = await authFetch(`${API_BASE_URL}/api/export-report`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -761,7 +760,7 @@ const searchTrackingNumber = async (trackingNumber, lookupIndex = 1) => {
   setLookupState(prev => ({ ...prev, loading: true, error: '', lastSearch: trackingNumber }));
 
   try {
-    const response = await fetch(`${API_BASE_URL}/api/tracking-lookup`, {
+    const response = await authFetch(`${API_BASE_URL}/api/tracking-lookup`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -815,7 +814,7 @@ const runScenarioAnalysis = async (dispatcherName) => {
       }
     };
 
-    const response = await fetch(`${API_BASE_URL}/api/scenario-analysis`, {
+    const response = await authFetch(`${API_BASE_URL}/api/scenario-analysis`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -1640,8 +1639,22 @@ const TrackingResultCard = ({ job }) => {
   );
 };
 
+if (checkingSession) {
+  return (
+    <div className="h-screen bg-gray-50 flex items-center justify-center">
+      <div className="animate-spin rounded-full h-8 w-8 border-2 border-blue-600 border-t-transparent"></div>
+    </div>
+  );
+}
+
+if (!user) {
+  return <Login />;
+}
+
 return (
-  <div className="h-screen bg-gray-50 flex overflow-hidden">
+  <div className="h-screen bg-gray-50 flex flex-col overflow-hidden">
+    <Navbar />
+    <div className="flex-1 flex overflow-hidden">
       {/* Mobile sidebar toggle */}
       <div className="lg:hidden fixed top-4 left-4 z-30">
         <button
@@ -3217,11 +3230,12 @@ opacity: (!analysisCompleted || buildingModels || !filters.databaseName || !filt
       
       {/* Overlay for mobile sidebar */}
       {sidebarOpen && (
-        <div 
+        <div
           className="fixed inset-0 bg-gray-600 bg-opacity-50 transition-opacity z-10 lg:hidden"
           onClick={() => setSidebarOpen(false)}
         ></div>
       )}
+    </div>
     </div>
   );
 };
