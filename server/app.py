@@ -5,13 +5,14 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from flask import Flask, jsonify, request
+from flask import Flask, Response, jsonify, request
 from flask_cors import CORS
 
 from db import get_client, get_collection
 from metrics import compute_productivity
 from forecasting import check_dispatcher_model, forecast_dispatcher
 from scenarios import run_scenario_analysis
+from report import generate_report_pdf
 
 DEFAULT_DAILY_CAPACITY = 130
 EXCLUDED_DISPATCHERS = {"N/A", "Unassigned", None, ""}
@@ -116,6 +117,50 @@ def productivity():
         }
 
     return jsonify(response)
+
+
+@app.post("/api/export-report")
+def export_report():
+    body = request.get_json(silent=True) or {}
+    database_name = body.get("database_name")
+    collection_name = body.get("collection_name")
+    start_date = body.get("start_date")
+    end_date = body.get("end_date")
+    requested_dispatchers = body.get("dispatchers")
+
+    if not all([database_name, collection_name, start_date, end_date]):
+        return jsonify({"error": "database_name, collection_name, start_date, and end_date are required"}), 400
+
+    collection = get_collection(database_name, collection_name)
+    orders = list(
+        collection.find(
+            {"jobDate": {"$gte": start_date, "$lte": end_date}},
+            ORDER_PROJECTION,
+        )
+    )
+
+    days = period_days(start_date, end_date)
+    data = compute_productivity(orders, days)
+
+    if requested_dispatchers and requested_dispatchers != "all":
+        dispatcher_names = [name for name in requested_dispatchers if name in data]
+        if not dispatcher_names:
+            return jsonify({"error": "none of the requested dispatchers have data in this period"}), 400
+        report_orders = [o for o in orders if o.get("assignedTo") in dispatcher_names]
+    else:
+        dispatcher_names = [name for name in data.keys() if name not in EXCLUDED_DISPATCHERS]
+        report_orders = [o for o in orders if o.get("assignedTo") not in EXCLUDED_DISPATCHERS]
+
+    summary = build_summary(report_orders, database_name, collection_name, start_date, end_date)
+    pdf_bytes = generate_report_pdf(dispatcher_names, data, summary)
+
+    return Response(
+        pdf_bytes,
+        mimetype="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="dispatcher-report-{start_date}-to-{end_date}.pdf"'
+        },
+    )
 
 
 @app.post("/api/tracking-lookup")

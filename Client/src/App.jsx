@@ -1,6 +1,6 @@
 import React from 'react'
 import { useState, useEffect } from 'react';
-import { Calendar, Search, Filter, TrendingUp, Calculator, Package, Clock, AlertTriangle, Users, TrendingDown, Settings, BarChart3, Activity, Database, ChevronDown, ChevronUp, Menu, X, MapPin, User, Truck, Eye, EyeOff, Warehouse } from 'lucide-react';
+import { Calendar, Search, Filter, TrendingUp, Calculator, Package, Clock, AlertTriangle, Users, TrendingDown, Settings, BarChart3, Activity, Database, ChevronDown, ChevronUp, Menu, X, MapPin, User, Truck, Eye, EyeOff, Warehouse, FileDown } from 'lucide-react';
 import { LineChart, XAxis, YAxis, CartesianGrid, Tooltip, Legend, Line, ResponsiveContainer, Bar } from 'recharts';
 
 const App = () => {
@@ -66,6 +66,8 @@ const [filters, setFilters] = useState({
   endDate: '',
   comparisonPeriod: true
 });
+const [exportSelection, setExportSelection] = useState({ mode: 'all', selected: [] });
+const [exporting, setExporting] = useState(false);
 
   // Relative by default so the Vite dev proxy (see vite.config.ts) or same-origin
   // production hosting handles routing; override with VITE_API_BASE_URL if the API
@@ -699,6 +701,54 @@ useEffect(() => {
       console.error('Error fetching productivity data:', err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const toggleExportDispatcher = (name) => {
+    setExportSelection(prev => ({
+      ...prev,
+      selected: prev.selected.includes(name)
+        ? prev.selected.filter(n => n !== name)
+        : [...prev.selected, name]
+    }));
+  };
+
+  const handleExportReport = async () => {
+    setExporting(true);
+    setError('');
+    try {
+      const dispatchers = exportSelection.mode === 'all' ? 'all' : exportSelection.selected;
+      const response = await fetch(`${API_BASE_URL}/api/export-report`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          database_name: filters.databaseName,
+          collection_name: filters.collectionName,
+          start_date: filters.startDate,
+          end_date: filters.endDate,
+          dispatchers
+        })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || 'Failed to export report');
+      }
+
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `dispatcher-report-${filters.startDate}-to-${filters.endDate}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setError(err.message);
+      console.error('Error exporting report:', err);
+    } finally {
+      setExporting(false);
     }
   };
 
@@ -2114,7 +2164,60 @@ opacity: (!analysisCompleted || buildingModels || !filters.databaseName || !filt
     {chartData.company && <CompanyChart data={chartData.company} />}
   </div>
 )}
-          
+
+          {/* Export Report */}
+          {data.data && Object.keys(data.data).length > 0 && (
+            <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6 mb-8">
+              <h3 className="text-lg font-semibold text-gray-800 flex items-center mb-4">
+                <FileDown className="w-5 h-5 mr-2 text-blue-600" />
+                Export Report
+              </h3>
+
+              <div className="flex items-center space-x-6 mb-4">
+                <label className="flex items-center space-x-2 text-sm text-gray-700 cursor-pointer">
+                  <input
+                    type="radio"
+                    checked={exportSelection.mode === 'all'}
+                    onChange={() => setExportSelection(prev => ({ ...prev, mode: 'all' }))}
+                  />
+                  <span>All Dispatchers ({Object.keys(data.data).filter(n => n !== 'N/A').length})</span>
+                </label>
+                <label className="flex items-center space-x-2 text-sm text-gray-700 cursor-pointer">
+                  <input
+                    type="radio"
+                    checked={exportSelection.mode === 'selected'}
+                    onChange={() => setExportSelection(prev => ({ ...prev, mode: 'selected' }))}
+                  />
+                  <span>Select Dispatchers</span>
+                </label>
+              </div>
+
+              {exportSelection.mode === 'selected' && (
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-4 p-3 bg-gray-50 rounded-lg max-h-48 overflow-y-auto">
+                  {Object.keys(data.data).filter(n => n !== 'N/A').sort().map(name => (
+                    <label key={name} className="flex items-center space-x-2 text-sm text-gray-700 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={exportSelection.selected.includes(name)}
+                        onChange={() => toggleExportDispatcher(name)}
+                      />
+                      <span>{name}</span>
+                    </label>
+                  ))}
+                </div>
+              )}
+
+              <button
+                onClick={handleExportReport}
+                disabled={exporting || (exportSelection.mode === 'selected' && exportSelection.selected.length === 0)}
+                className="flex items-center space-x-2 bg-blue-600 text-white px-6 py-2 rounded-lg font-medium hover:bg-blue-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed"
+              >
+                <FileDown className="w-4 h-4" />
+                <span>{exporting ? 'Generating PDF...' : 'Export PDF Report'}</span>
+              </button>
+            </div>
+          )}
+
           {/* Productivity Cards */}
           {data.data && Object.keys(data.data).length > 0 && (
             <div>
