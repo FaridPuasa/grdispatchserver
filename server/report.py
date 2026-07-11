@@ -97,10 +97,15 @@ def _table_style(header_bg=BRAND_BLUE, header_fg=colors.white, zebra=True):
 
 def _overview_table(summary, dispatcher_count):
     rows = [
-        ["Total Jobs", "Warehouse Receipts", "Dispatchers Included"],
-        [str(summary["total_jobs"]), str(summary["warehouse_receipts"]), str(dispatcher_count)],
+        ["Total Jobs", "In Warehouse", "Warehouse Receipts", "Dispatchers Included"],
+        [
+            str(summary["total_jobs"]),
+            str(summary.get("in_warehouse", 0)),
+            str(summary["warehouse_receipts"]),
+            str(dispatcher_count),
+        ],
     ]
-    table = Table(rows, colWidths=[55 * mm, 55 * mm, 55 * mm])
+    table = Table(rows, colWidths=[41 * mm] * 4)
     table.setStyle(
         TableStyle(
             [
@@ -291,6 +296,36 @@ def _area_table(area_distribution):
     return table
 
 
+SCHEDULE_TABLE_MAX_DAYS = 14
+
+
+def _schedule_paragraph(schedule):
+    if not schedule or not schedule.get("days_worked"):
+        return Paragraph("No 'Out for Delivery' / 'Completed' history recorded for this period.", NORMAL_STYLE)
+    days_worked = schedule["days_worked"]
+    note = ""
+    if days_worked > SCHEDULE_TABLE_MAX_DAYS:
+        note = f" See the dashboard for the full {days_worked}-day breakdown."
+    return Paragraph(
+        f"Avg. departure (first 'Out for Delivery'): <b>{schedule.get('avg_start_time') or 'N/A'}</b> &nbsp;|&nbsp; "
+        f"Avg. end time (last 'Completed'): <b>{schedule.get('avg_end_time') or 'N/A'}</b> &nbsp;|&nbsp; "
+        f"Days worked: <b>{days_worked}</b>.{note}",
+        NORMAL_STYLE,
+    )
+
+
+def _schedule_table(schedule):
+    daily = (schedule or {}).get("daily") or []
+    if not daily or len(daily) > SCHEDULE_TABLE_MAX_DAYS:
+        return None
+    rows = [["Date", "Departure", "End"]]
+    for day in daily:
+        rows.append([day["date"], day.get("start_time") or "N/A", day.get("end_time") or "N/A"])
+    table = Table(rows, colWidths=[55 * mm, 55 * mm, 55 * mm])
+    table.setStyle(_table_style(header_bg=colors.HexColor("#F3F4F6"), header_fg=colors.black))
+    return table
+
+
 def _gaps_paragraph(completion_gaps):
     if not completion_gaps or not completion_gaps.get("total_gaps"):
         return Paragraph(
@@ -344,6 +379,13 @@ def generate_report_pdf(dispatcher_names, dispatcher_data, summary, orders, star
 
         story.append(Paragraph("Score Breakdown", SUBHEADING_STYLE))
         story.append(_score_breakdown_chart(score_data))
+
+        story.append(Paragraph("Working Hours", SUBHEADING_STYLE))
+        story.append(_schedule_paragraph(score_data.get("schedule")))
+        schedule_table = _schedule_table(score_data.get("schedule"))
+        if schedule_table is not None:
+            story.append(Spacer(1, 2 * mm))
+            story.append(schedule_table)
 
         trend = _trend_chart(orders_by_dispatcher.get(name, []), start_date, end_date)
         if trend is not None:

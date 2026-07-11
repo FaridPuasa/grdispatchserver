@@ -1,6 +1,6 @@
 import React from 'react'
 import { useState, useEffect } from 'react';
-import { Calendar, Search, Filter, TrendingUp, Calculator, Package, Clock, AlertTriangle, Users, TrendingDown, Settings, BarChart3, Activity, Database, ChevronDown, ChevronUp, Menu, X, MapPin, User, Truck, Eye, EyeOff, Warehouse, FileDown } from 'lucide-react';
+import { Calendar, Search, Filter, TrendingUp, Calculator, Package, Clock, AlertTriangle, Users, TrendingDown, Settings, BarChart3, Activity, Database, ChevronDown, ChevronUp, Menu, X, MapPin, User, Truck, Eye, EyeOff, Warehouse, FileDown, PackageCheck, LogIn, LogOut } from 'lucide-react';
 import { LineChart, XAxis, YAxis, CartesianGrid, Tooltip, Legend, Line, ResponsiveContainer, Bar } from 'recharts';
 import { useAuth } from './AuthContext.jsx';
 import Login from './Login.jsx';
@@ -12,6 +12,7 @@ const App = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [expandedDispatchers, setExpandedDispatchers] = useState({});
+  const [expandedSchedules, setExpandedSchedules] = useState({});
   const [comparisonData, setComparisonData] = useState(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [chartData, setChartData] = useState({
@@ -867,6 +868,13 @@ const handleTrackingSearch = (e, lookupIndex = 1) => {
     }));
   };
 
+  const toggleScheduleExpanded = (dispatcherName) => {
+    setExpandedSchedules(prev => ({
+      ...prev,
+      [dispatcherName]: !prev[dispatcherName]
+    }));
+  };
+
   const getScoreBadgeColor = (score) => {
     if (score >= 85) return 'bg-green-100 text-green-800';
     if (score >= 70) return 'bg-yellow-100 text-yellow-800';
@@ -1337,12 +1345,58 @@ const ProductivityCard = ({ name, scoreData, comparisonData }) => (
               Additional Metrics
             </h4>
             <div className="grid grid-cols-2 gap-3 text-xs">
-              
+
               <div className="p-2 bg-gray-50 rounded">
                 <div className="text-gray-500">Route Difficulty</div>
                 <div className="font-medium text-gray-800">{scoreData.metrics.route_difficulty_score}%</div>
               </div>
+              <div className="p-2 bg-gray-50 rounded">
+                <div className="text-gray-500 flex items-center"><LogOut className="w-3 h-3 mr-1" />Avg Departure</div>
+                <div className="font-medium text-gray-800">{scoreData.schedule?.avg_start_time || 'N/A'}</div>
+              </div>
+              <div className="p-2 bg-gray-50 rounded">
+                <div className="text-gray-500 flex items-center"><LogIn className="w-3 h-3 mr-1" />Avg End Time</div>
+                <div className="font-medium text-gray-800">{scoreData.schedule?.avg_end_time || 'N/A'}</div>
+              </div>
+              <div className="p-2 bg-gray-50 rounded">
+                <div className="text-gray-500">Days Worked</div>
+                <div className="font-medium text-gray-800">{scoreData.schedule?.days_worked || 0}</div>
+              </div>
             </div>
+
+            {scoreData.schedule?.daily?.length > 0 && (
+              <div className="mt-2">
+                <button
+                  onClick={() => toggleScheduleExpanded(name)}
+                  className="flex items-center text-xs text-blue-600 hover:text-blue-800 font-medium"
+                >
+                  {expandedSchedules[name] ? <ChevronUp className="w-3 h-3 mr-1" /> : <ChevronDown className="w-3 h-3 mr-1" />}
+                  {expandedSchedules[name] ? 'Hide' : 'View'} Daily Schedule ({scoreData.schedule.daily.length} day{scoreData.schedule.daily.length === 1 ? '' : 's'})
+                </button>
+                {expandedSchedules[name] && (
+                  <div className="mt-2 max-h-48 overflow-y-auto border border-gray-100 rounded">
+                    <table className="w-full text-xs">
+                      <thead className="bg-gray-50 sticky top-0">
+                        <tr>
+                          <th className="px-2 py-1 text-left text-gray-500 font-medium">Date</th>
+                          <th className="px-2 py-1 text-left text-gray-500 font-medium">Departure</th>
+                          <th className="px-2 py-1 text-left text-gray-500 font-medium">End</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {scoreData.schedule.daily.map((day) => (
+                          <tr key={day.date}>
+                            <td className="px-2 py-1 text-gray-700">{day.date}</td>
+                            <td className="px-2 py-1 text-gray-700">{day.start_time || 'N/A'}</td>
+                            <td className="px-2 py-1 text-gray-700">{day.end_time || 'N/A'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           {/* ARIMA Predictive Analysis */}
@@ -2101,7 +2155,7 @@ opacity: (!analysisCompleted || buildingModels || !filters.databaseName || !filt
 
           {/* Summary Cards */}
           {data.summary && (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6 mb-8">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7 gap-6 mb-8">
               <MetricCard
                 title="Total Jobs"
                 value={data.summary.total_jobs}
@@ -2109,6 +2163,14 @@ opacity: (!analysisCompleted || buildingModels || !filters.databaseName || !filt
                 icon={Package}
                 color="blue"
                 comparisonValue={comparisonData?.summary?.total_jobs}
+              />
+              <MetricCard
+                title="In Warehouse"
+                value={data.summary.in_warehouse || 0}
+                subtitle="Parcels currently at warehouse"
+                icon={PackageCheck}
+                color="yellow"
+                comparisonValue={comparisonData?.summary?.in_warehouse}
               />
               <MetricCard
                 title="Warehouse Receipts"
@@ -3034,6 +3096,12 @@ opacity: (!analysisCompleted || buildingModels || !filters.databaseName || !filt
                           Route Score
                         </th>
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Departure Time
+                        </th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          End Time
+                        </th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                           Total Jobs
                         </th>
                       </tr>
@@ -3091,6 +3159,12 @@ opacity: (!analysisCompleted || buildingModels || !filters.databaseName || !filt
                             </td>
                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                               {scoreData.metrics.route_difficulty_score}%
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                              {scoreData.schedule?.avg_start_time || 'N/A'}
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                              {scoreData.schedule?.avg_end_time || 'N/A'}
                             </td>
                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                               {scoreData.total_jobs} ({scoreData.completed_jobs} completed)

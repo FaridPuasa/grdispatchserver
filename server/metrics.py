@@ -1,6 +1,8 @@
 import re
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+
+BRUNEI_TZ = timezone(timedelta(hours=8))
 
 AREA_TIERS = {
     "TUTONG": 1,
@@ -31,6 +33,7 @@ SCORE_WEIGHTS = {
 
 COMPLETED_STATUS = "Completed"
 AT_WAREHOUSE_STATUS = "At Warehouse"
+OUT_FOR_DELIVERY_STATUS = "Out for Delivery"
 
 
 def parse_dt(value):
@@ -170,6 +173,58 @@ def compute_area_distribution(orders):
     return dict(counts)
 
 
+def _time_of_day_seconds(dt):
+    return dt.hour * 3600 + dt.minute * 60 + dt.second
+
+
+def _format_hhmm(seconds):
+    hours, remainder = divmod(int(seconds) % 86400, 3600)
+    minutes = remainder // 60
+    return f"{hours:02d}:{minutes:02d}"
+
+
+def compute_daily_schedule(orders):
+    starts_by_day = defaultdict(list)
+    ends_by_day = defaultdict(list)
+
+    for order in orders:
+        for entry in order.get("history", []):
+            status = entry.get("statusHistory")
+            if status not in (OUT_FOR_DELIVERY_STATUS, COMPLETED_STATUS):
+                continue
+            dt = parse_dt(entry.get("dateUpdated"))
+            if dt is None:
+                continue
+            dt = dt.astimezone(BRUNEI_TZ)
+            day = dt.date().isoformat()
+            if status == OUT_FOR_DELIVERY_STATUS:
+                starts_by_day[day].append(dt)
+            else:
+                ends_by_day[day].append(dt)
+
+    daily = []
+    for day in sorted(set(starts_by_day) | set(ends_by_day)):
+        start_dt = min(starts_by_day[day]) if starts_by_day.get(day) else None
+        end_dt = max(ends_by_day[day]) if ends_by_day.get(day) else None
+        daily.append(
+            {
+                "date": day,
+                "start_time": start_dt.strftime("%H:%M") if start_dt else None,
+                "end_time": end_dt.strftime("%H:%M") if end_dt else None,
+            }
+        )
+
+    start_seconds = [_time_of_day_seconds(min(v)) for v in starts_by_day.values()]
+    end_seconds = [_time_of_day_seconds(max(v)) for v in ends_by_day.values()]
+
+    return {
+        "daily": daily,
+        "avg_start_time": _format_hhmm(sum(start_seconds) / len(start_seconds)) if start_seconds else None,
+        "avg_end_time": _format_hhmm(sum(end_seconds) / len(end_seconds)) if end_seconds else None,
+        "days_worked": len(daily),
+    }
+
+
 def compute_dispatcher_metrics(orders, period_days):
     total_jobs = len(orders)
     completed_orders = [o for o in orders if o.get("currentStatus") == COMPLETED_STATUS]
@@ -209,6 +264,7 @@ def compute_dispatcher_metrics(orders, period_days):
         },
         "completion_gaps": compute_completion_gaps(completed_orders),
         "area_distribution": compute_area_distribution(orders),
+        "schedule": compute_daily_schedule(orders),
     }
 
 

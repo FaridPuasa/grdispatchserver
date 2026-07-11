@@ -1,5 +1,5 @@
 import os
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 from dotenv import load_dotenv
 
@@ -18,13 +18,15 @@ from auth import (
     verify_password,
 )
 from db import get_client, get_collection
-from metrics import compute_productivity
+from metrics import compute_productivity, parse_dt
 from forecasting import check_dispatcher_model, forecast_dispatcher
 from scenarios import run_scenario_analysis
 from report import generate_report_pdf
 
 DEFAULT_DAILY_CAPACITY = 130
 EXCLUDED_DISPATCHERS = {"N/A", "Unassigned", None, ""}
+WAREHOUSE_STATUSES = {"At Warehouse", "Return to Warehouse"}
+WAREHOUSE_ENTRY_WINDOW_DAYS = 30
 
 app = Flask(__name__)
 CORS(app)
@@ -50,6 +52,26 @@ def build_summary(orders, database_name, collection_name, start_date, end_date):
         "database": database_name,
         "collection": collection_name,
     }
+
+
+def count_in_warehouse(collection):
+    cutoff = datetime.now(timezone.utc) - timedelta(days=WAREHOUSE_ENTRY_WINDOW_DAYS)
+    docs = collection.find(
+        {"currentStatus": {"$in": list(WAREHOUSE_STATUSES)}},
+        {"warehouseEntryDateTime": 1},
+    )
+    count = 0
+    for doc in docs:
+        # warehouseEntryDateTime is stored inconsistently (BSON date, ISO string with
+        # varying UTC offsets, or the placeholder "N/A"), so filter in Python via parse_dt
+        # rather than relying on a single Mongo comparison operator across mixed types.
+        try:
+            entry_dt = parse_dt(doc.get("warehouseEntryDateTime"))
+        except (ValueError, TypeError):
+            continue
+        if entry_dt is not None and entry_dt >= cutoff:
+            count += 1
+    return count
 
 
 def period_days(start_date, end_date):
@@ -128,6 +150,7 @@ def productivity():
     days = period_days(start_date, end_date)
     data = compute_productivity(orders, days)
     summary = build_summary(orders, database_name, collection_name, start_date, end_date)
+    summary["in_warehouse"] = count_in_warehouse(collection)
 
     response = {"data": data, "summary": summary}
 
@@ -196,6 +219,7 @@ def export_report():
         report_orders = [o for o in orders if o.get("assignedTo") not in EXCLUDED_DISPATCHERS]
 
     summary = build_summary(report_orders, database_name, collection_name, start_date, end_date)
+    summary["in_warehouse"] = count_in_warehouse(collection)
     pdf_bytes = generate_report_pdf(dispatcher_names, data, summary, report_orders, start_date, end_date)
 
     return Response(
