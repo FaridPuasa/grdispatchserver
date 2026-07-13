@@ -472,6 +472,22 @@ const predictCompanyCapacity = async () => {
   }
 };
 
+const pollJob = async (jobId, { intervalMs = 2000, timeoutMs = 300000 } = {}) => {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const response = await authFetch(`${API_BASE_URL}/api/jobs/${jobId}`);
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.error || 'Failed to check job status');
+    }
+    const job = await response.json();
+    if (job.status === 'done') return job.result;
+    if (job.status === 'error') throw new Error(job.error || 'Job failed');
+    await new Promise(resolve => setTimeout(resolve, intervalMs));
+  }
+  throw new Error('Timed out waiting for the job to finish');
+};
+
 const buildPredictionModels = async () => {
   if (!filters.databaseName || !filters.collectionName) {
     setError('Database name and collection name are required');
@@ -496,7 +512,8 @@ const buildPredictionModels = async () => {
       throw new Error(errorData.error || 'Failed to build prediction models');
     }
 
-    const result = await response.json();
+    const { job_id } = await response.json();
+    const result = await pollJob(job_id);
     setPredictiveData(prev => ({
       ...prev,
       models: result.models_built || {}
@@ -533,7 +550,8 @@ const predictPerformance = async (dispatcherName, monthsAhead = 3) => {
       throw new Error(errorData.error || 'Failed to predict performance');
     }
 
-    const result = await response.json();
+    const { job_id } = await response.json();
+    const result = await pollJob(job_id);
     setPredictiveData(prev => ({
       ...prev,
       predictions: {
@@ -598,7 +616,8 @@ const runCustomPrediction = async () => {
       throw new Error(errorData.error || 'Failed to generate custom prediction');
     }
 
-    const result = await response.json();
+    const { job_id } = await response.json();
+    const result = await pollJob(job_id);
     console.log('Prediction response:', result);
     setCustomPrediction(prev => ({ ...prev, results: result.arima_prediction || result, loading: false }));
   } catch (err) {
@@ -831,7 +850,8 @@ const runScenarioAnalysis = async (dispatcherName) => {
       throw new Error(errorData.error || 'Failed to run scenario analysis');
     }
 
-    const result = await response.json();
+    const { job_id } = await response.json();
+    const result = await pollJob(job_id);
     setPredictiveData(prev => ({
       ...prev,
       scenarios: {

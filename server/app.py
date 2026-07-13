@@ -22,6 +22,7 @@ from metrics import compute_productivity, parse_dt
 from forecasting import build_monthly_productivity, check_dispatcher_model, forecast_dispatcher
 from scenarios import run_scenario_analysis
 from report import generate_report_pdf
+from jobs import start_job, get_job
 
 DEFAULT_DAILY_CAPACITY = 130
 EXCLUDED_DISPATCHERS = {"N/A", "Unassigned", None, ""}
@@ -260,6 +261,15 @@ def tracking_lookup():
     return jsonify({"jobs": jobs})
 
 
+@app.get("/api/jobs/<job_id>")
+@require_auth
+def job_status(job_id):
+    job = get_job(job_id)
+    if job is None:
+        return jsonify({"error": "job not found"}), 404
+    return jsonify(job)
+
+
 @app.post("/api/build-prediction-models")
 @require_auth
 def build_prediction_models():
@@ -270,22 +280,25 @@ def build_prediction_models():
     if not all([database_name, collection_name]):
         return jsonify({"error": "database_name and collection_name are required"}), 400
 
-    collection = get_collection(database_name, collection_name)
-    all_orders = list(collection.find({}, ORDER_PROJECTION))
+    def run():
+        collection = get_collection(database_name, collection_name)
+        all_orders = list(collection.find({}, ORDER_PROJECTION))
 
-    dispatchers = {
-        order.get("assignedTo")
-        for order in all_orders
-        if order.get("assignedTo") not in EXCLUDED_DISPATCHERS
-    }
+        dispatchers = {
+            order.get("assignedTo")
+            for order in all_orders
+            if order.get("assignedTo") not in EXCLUDED_DISPATCHERS
+        }
 
-    monthly_productivity = build_monthly_productivity(all_orders)
-    models_built = {
-        dispatcher: check_dispatcher_model(monthly_productivity, dispatcher)
-        for dispatcher in sorted(dispatchers)
-    }
+        monthly_productivity = build_monthly_productivity(all_orders)
+        models_built = {
+            dispatcher: check_dispatcher_model(monthly_productivity, dispatcher)
+            for dispatcher in sorted(dispatchers)
+        }
 
-    return jsonify({"models_built": models_built, "total_models": len(models_built)})
+        return {"models_built": models_built, "total_models": len(models_built)}
+
+    return jsonify({"job_id": start_job(run)}), 202
 
 
 @app.post("/api/custom-prediction")
@@ -301,15 +314,12 @@ def custom_prediction():
     if not dispatcher:
         return jsonify({"error": "dispatcher is required"}), 400
 
-    collection = get_collection(database_name, collection_name)
-    all_orders = list(collection.find({}, ORDER_PROJECTION))
+    def run():
+        collection = get_collection(database_name, collection_name)
+        all_orders = list(collection.find({}, ORDER_PROJECTION))
+        return {"arima_prediction": forecast_dispatcher(all_orders, dispatcher, months_ahead, daily_capacity)}
 
-    try:
-        prediction = forecast_dispatcher(all_orders, dispatcher, months_ahead, daily_capacity)
-    except ValueError as exc:
-        return jsonify({"error": str(exc)}), 400
-
-    return jsonify({"arima_prediction": prediction})
+    return jsonify({"job_id": start_job(run)}), 202
 
 
 @app.post("/api/scenario-analysis")
@@ -324,15 +334,12 @@ def scenario_analysis():
     if not dispatcher or not scenarios:
         return jsonify({"error": "dispatcher and scenarios are required"}), 400
 
-    collection = get_collection(database_name, collection_name)
-    all_orders = list(collection.find({}, ORDER_PROJECTION))
+    def run():
+        collection = get_collection(database_name, collection_name)
+        all_orders = list(collection.find({}, ORDER_PROJECTION))
+        return {"scenarios": run_scenario_analysis(all_orders, dispatcher, scenarios)}
 
-    try:
-        results = run_scenario_analysis(all_orders, dispatcher, scenarios)
-    except ValueError as exc:
-        return jsonify({"error": str(exc)}), 400
-
-    return jsonify({"scenarios": results})
+    return jsonify({"job_id": start_job(run)}), 202
 
 
 if __name__ == "__main__":
