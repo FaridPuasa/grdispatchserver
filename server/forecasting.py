@@ -30,7 +30,7 @@ def days_in_month(month_key_str):
     return (next_month - date(year, month, 1)).days
 
 
-def build_dispatcher_monthly_series(all_orders, dispatcher):
+def build_monthly_productivity(all_orders):
     by_month = defaultdict(list)
     for order in all_orders:
         job_date = order.get("jobDate")
@@ -41,16 +41,26 @@ def build_dispatcher_monthly_series(all_orders, dispatcher):
             continue
         by_month[key].append(order)
 
-    scores = {}
-    throughputs = {}
-    for month, month_orders in sorted(by_month.items()):
-        month_result = compute_productivity(month_orders, days_in_month(month))
-        if dispatcher in month_result:
-            scores[month] = month_result[dispatcher]["overall_score"]
-            throughputs[month] = month_result[dispatcher]["metrics"]["throughput_per_day"]
+    return {
+        month: compute_productivity(month_orders, days_in_month(month))
+        for month, month_orders in sorted(by_month.items())
+    }
 
-    months = sorted(scores.keys())
-    return months, [scores[m] for m in months], [throughputs[m] for m in months]
+
+def dispatcher_series_from_monthly(monthly_productivity, dispatcher):
+    months = sorted(
+        month for month, result in monthly_productivity.items() if dispatcher in result
+    )
+    scores = [monthly_productivity[m][dispatcher]["overall_score"] for m in months]
+    throughputs = [
+        monthly_productivity[m][dispatcher]["metrics"]["throughput_per_day"] for m in months
+    ]
+    return months, scores, throughputs
+
+
+def build_dispatcher_monthly_series(all_orders, dispatcher):
+    monthly_productivity = build_monthly_productivity(all_orders)
+    return dispatcher_series_from_monthly(monthly_productivity, dispatcher)
 
 
 def fit_and_forecast(values, steps):
@@ -73,8 +83,8 @@ def fit_and_forecast(values, steps):
     ]
 
 
-def check_dispatcher_model(all_orders, dispatcher):
-    months, scores, _ = build_dispatcher_monthly_series(all_orders, dispatcher)
+def check_dispatcher_model(monthly_productivity, dispatcher):
+    months, scores, _ = dispatcher_series_from_monthly(monthly_productivity, dispatcher)
     if len(scores) < MIN_MONTHS_FOR_MODEL:
         return {
             "error": f"insufficient historical data ({len(scores)} months, need {MIN_MONTHS_FOR_MODEL})"

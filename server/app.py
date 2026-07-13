@@ -19,7 +19,7 @@ from auth import (
 )
 from db import get_client, get_collection
 from metrics import compute_productivity, parse_dt
-from forecasting import check_dispatcher_model, forecast_dispatcher
+from forecasting import build_monthly_productivity, check_dispatcher_model, forecast_dispatcher
 from scenarios import run_scenario_analysis
 from report import generate_report_pdf
 
@@ -279,8 +279,9 @@ def build_prediction_models():
         if order.get("assignedTo") not in EXCLUDED_DISPATCHERS
     }
 
+    monthly_productivity = build_monthly_productivity(all_orders)
     models_built = {
-        dispatcher: check_dispatcher_model(all_orders, dispatcher)
+        dispatcher: check_dispatcher_model(monthly_productivity, dispatcher)
         for dispatcher in sorted(dispatchers)
     }
 
