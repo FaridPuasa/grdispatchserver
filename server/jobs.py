@@ -1,31 +1,58 @@
 import threading
 import uuid
+from datetime import datetime, timedelta, timezone
 
-# In-memory store: only correct with a single gunicorn worker process (current
-# Procfile has no --workers flag, so this holds). A second worker/dyno would poll
-# a job_id that was never started in its own process.
-_jobs = {}
-_lock = threading.Lock()
+from db import get_collection
+
+JOB_DATABASE = "GR_DMS"
+JOB_COLLECTION = "prediction_jobs"
+JOB_TTL = timedelta(hours=1)
+
+# Job state lives in Mongo, not a process-local dict: Heroku can serve the
+# start request and the poll requests from different gunicorn worker
+# processes (or recycle the worker between them), so in-memory state isn't
+# visible across those requests.
+_index_ready = False
+_index_lock = threading.Lock()
+
+
+def _jobs_collection():
+    global _index_ready
+    collection = get_collection(JOB_DATABASE, JOB_COLLECTION)
+    if not _index_ready:
+        with _index_lock:
+            if not _index_ready:
+                collection.create_index("expires_at", expireAfterSeconds=0)
+                _index_ready = True
+    return collection
 
 
 def start_job(target):
     job_id = uuid.uuid4().hex
-    with _lock:
-        _jobs[job_id] = {"status": "running", "result": None, "error": None}
+    collection = _jobs_collection()
+    collection.insert_one(
+        {
+            "_id": job_id,
+            "status": "running",
+            "result": None,
+            "error": None,
+            "expires_at": datetime.now(timezone.utc) + JOB_TTL,
+        }
+    )
 
     def run():
         try:
             result = target()
-            with _lock:
-                _jobs[job_id] = {"status": "done", "result": result, "error": None}
+            collection.update_one({"_id": job_id}, {"$set": {"status": "done", "result": result}})
         except Exception as exc:
-            with _lock:
-                _jobs[job_id] = {"status": "error", "result": None, "error": str(exc)}
+            collection.update_one({"_id": job_id}, {"$set": {"status": "error", "error": str(exc)}})
 
     threading.Thread(target=run, daemon=True).start()
     return job_id
 
 
 def get_job(job_id):
-    with _lock:
-        return _jobs.get(job_id)
+    doc = _jobs_collection().find_one({"_id": job_id})
+    if doc is None:
+        return None
+    return {"status": doc["status"], "result": doc.get("result"), "error": doc.get("error")}
