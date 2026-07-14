@@ -19,7 +19,13 @@ from auth import (
 )
 from db import get_client, get_collection
 from metrics import compute_productivity, parse_dt
-from forecasting import build_monthly_productivity, check_dispatcher_model, forecast_dispatcher
+from forecasting import (
+    build_weekly_productivity,
+    check_dispatcher_model,
+    dispatcher_model_diagnostics,
+    dispatcher_seasonal_decomposition,
+    forecast_dispatcher,
+)
 from scenarios import run_scenario_analysis
 from report import generate_report_pdf
 from jobs import start_job, get_job
@@ -290,9 +296,9 @@ def build_prediction_models():
             if order.get("assignedTo") not in EXCLUDED_DISPATCHERS
         }
 
-        monthly_productivity = build_monthly_productivity(all_orders)
+        weekly_productivity = build_weekly_productivity(all_orders)
         models_built = {
-            dispatcher: check_dispatcher_model(monthly_productivity, dispatcher)
+            dispatcher: check_dispatcher_model(weekly_productivity, dispatcher)
             for dispatcher in sorted(dispatchers)
         }
 
@@ -338,6 +344,87 @@ def scenario_analysis():
         collection = get_collection(database_name, collection_name)
         all_orders = list(collection.find({}, ORDER_PROJECTION))
         return {"scenarios": run_scenario_analysis(all_orders, dispatcher, scenarios)}
+
+    return jsonify({"job_id": start_job(run)}), 202
+
+
+@app.post("/api/model-diagnostics")
+@require_auth
+def model_diagnostics():
+    body = request.get_json(silent=True) or {}
+    dispatcher = body.get("dispatcher")
+    database_name = body.get("database_name", "GR_DMS")
+    collection_name = body.get("collection_name", "orders")
+
+    if not dispatcher:
+        return jsonify({"error": "dispatcher is required"}), 400
+
+    def run():
+        collection = get_collection(database_name, collection_name)
+        all_orders = list(collection.find({}, ORDER_PROJECTION))
+        return {"diagnostics": dispatcher_model_diagnostics(all_orders, dispatcher)}
+
+    return jsonify({"job_id": start_job(run)}), 202
+
+
+@app.post("/api/seasonal-decomposition")
+@require_auth
+def seasonal_decomposition():
+    body = request.get_json(silent=True) or {}
+    dispatcher = body.get("dispatcher")
+    database_name = body.get("database_name", "GR_DMS")
+    collection_name = body.get("collection_name", "orders")
+
+    if not dispatcher:
+        return jsonify({"error": "dispatcher is required"}), 400
+
+    collection = get_collection(database_name, collection_name)
+    all_orders = list(collection.find({}, ORDER_PROJECTION))
+
+    try:
+        decomposition = dispatcher_seasonal_decomposition(all_orders, dispatcher)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    return jsonify({"decomposition": decomposition})
+
+
+@app.post("/api/bulk-custom-predictions")
+@require_auth
+def bulk_custom_predictions():
+    body = request.get_json(silent=True) or {}
+    database_name = body.get("database_name", "GR_DMS")
+    collection_name = body.get("collection_name", "orders")
+    months_ahead = int(body.get("months_ahead") or 3)
+    daily_capacity = int(body.get("daily_capacity") or DEFAULT_DAILY_CAPACITY)
+    requested_dispatchers = body.get("dispatchers")
+
+    def run():
+        collection = get_collection(database_name, collection_name)
+        all_orders = list(collection.find({}, ORDER_PROJECTION))
+
+        if requested_dispatchers and requested_dispatchers != "all":
+            dispatchers = requested_dispatchers
+        else:
+            dispatchers = sorted(
+                {
+                    order.get("assignedTo")
+                    for order in all_orders
+                    if order.get("assignedTo") not in EXCLUDED_DISPATCHERS
+                }
+            )
+
+        results = {}
+        for dispatcher in dispatchers:
+            try:
+                results[dispatcher] = forecast_dispatcher(all_orders, dispatcher, months_ahead, daily_capacity)
+            except Exception as exc:
+                results[dispatcher] = {"error": str(exc)}
+
+        return {
+            "predictions": results,
+            "total_predictions": sum(1 for r in results.values() if "error" not in r),
+        }
 
     return jsonify({"job_id": start_job(run)}), 202
 

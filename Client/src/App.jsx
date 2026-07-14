@@ -42,7 +42,15 @@ const [customPrediction, setCustomPrediction] = useState({
   results: null
 });
 const [analysisCompleted, setAnalysisCompleted] = useState(false);
-const [bulkPrediction] = useState({
+const [bulkPrediction, setBulkPrediction] = useState({
+  loading: false,
+  results: null
+});
+const [modelDiagnostics, setModelDiagnostics] = useState({
+  loading: false,
+  results: null
+});
+const [seasonalDecomposition, setSeasonalDecomposition] = useState({
   loading: false,
   results: null
 });
@@ -624,6 +632,82 @@ const runCustomPrediction = async () => {
     console.error('Prediction error:', err);
     setError(err.message);
     setCustomPrediction(prev => ({ ...prev, loading: false }));
+  }
+};
+
+const runBulkPredictions = async () => {
+  setBulkPrediction({ loading: true, results: null });
+  try {
+    const response = await authFetch(`${API_BASE_URL}/api/bulk-custom-predictions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        months_ahead: customPrediction.monthsAhead,
+        daily_capacity: customPrediction.dailyCapacity ? parseInt(customPrediction.dailyCapacity) : null
+      })
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.error || 'Failed to generate bulk predictions');
+    }
+
+    const { job_id } = await response.json();
+    // Fitting a SARIMA model per dispatcher takes longer than a single prediction, so this job needs more time to finish.
+    const result = await pollJob(job_id, { timeoutMs: 600000 });
+    setBulkPrediction({ loading: false, results: result.predictions });
+  } catch (err) {
+    setError(err.message);
+    setBulkPrediction({ loading: false, results: null });
+  }
+};
+
+const fetchModelDiagnostics = async (dispatcherName) => {
+  setModelDiagnostics({ loading: true, results: null });
+  try {
+    const response = await authFetch(`${API_BASE_URL}/api/model-diagnostics`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ dispatcher: dispatcherName })
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.error || 'Failed to fetch model diagnostics');
+    }
+
+    const { job_id } = await response.json();
+    const result = await pollJob(job_id);
+    setModelDiagnostics({ loading: false, results: result.diagnostics });
+  } catch (err) {
+    setError(err.message);
+    setModelDiagnostics({ loading: false, results: null });
+  }
+};
+
+const fetchSeasonalDecomposition = async (dispatcherName) => {
+  setSeasonalDecomposition({ loading: true, results: null });
+  try {
+    const response = await authFetch(`${API_BASE_URL}/api/seasonal-decomposition`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ dispatcher: dispatcherName })
+    });
+
+    const result = await response.json();
+    if (!response.ok) {
+      throw new Error(result.error || 'Failed to fetch seasonal decomposition');
+    }
+    setSeasonalDecomposition({ loading: false, results: result.decomposition });
+  } catch (err) {
+    setError(err.message);
+    setSeasonalDecomposition({ loading: false, results: null });
   }
 };
 
@@ -2576,7 +2660,88 @@ opacity: (!analysisCompleted || buildingModels || !filters.databaseName || !filt
               'Generate Custom Prediction'
             )}
           </button>
-          
+
+          <button
+            onClick={() => fetchModelDiagnostics(selectedDispatcher)}
+            disabled={!selectedDispatcher || modelDiagnostics.loading}
+            style={{
+              backgroundColor: '#7C3AED',
+              color: '#FFFFFF',
+              padding: '0.5rem 1.5rem',
+              borderRadius: '0.5rem',
+              fontWeight: 500,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.5rem',
+              transition: 'background-color 0.2s',
+              cursor: (!selectedDispatcher || modelDiagnostics.loading) ? 'not-allowed' : 'pointer',
+              opacity: (!selectedDispatcher || modelDiagnostics.loading) ? 0.6 : 1,
+            }}
+          >
+            {modelDiagnostics.loading ? (
+              <>
+                <div className="inline-block animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent mr-2"></div>
+                Loading...
+              </>
+            ) : (
+              'Model Diagnostics'
+            )}
+          </button>
+
+          <button
+            onClick={() => fetchSeasonalDecomposition(selectedDispatcher)}
+            disabled={!selectedDispatcher || seasonalDecomposition.loading}
+            style={{
+              backgroundColor: '#0891B2',
+              color: '#FFFFFF',
+              padding: '0.5rem 1.5rem',
+              borderRadius: '0.5rem',
+              fontWeight: 500,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.5rem',
+              transition: 'background-color 0.2s',
+              cursor: (!selectedDispatcher || seasonalDecomposition.loading) ? 'not-allowed' : 'pointer',
+              opacity: (!selectedDispatcher || seasonalDecomposition.loading) ? 0.6 : 1,
+            }}
+          >
+            {seasonalDecomposition.loading ? (
+              <>
+                <div className="inline-block animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent mr-2"></div>
+                Loading...
+              </>
+            ) : (
+              'Seasonal Decomposition'
+            )}
+          </button>
+
+          <button
+            onClick={runBulkPredictions}
+            disabled={bulkPrediction.loading}
+            style={{
+              backgroundColor: '#0D9488',
+              color: '#FFFFFF',
+              padding: '0.5rem 1.5rem',
+              borderRadius: '0.5rem',
+              fontWeight: 500,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.5rem',
+              transition: 'background-color 0.2s',
+              cursor: bulkPrediction.loading ? 'not-allowed' : 'pointer',
+              opacity: bulkPrediction.loading ? 0.6 : 1,
+            }}
+          >
+            {bulkPrediction.loading ? (
+              <>
+                <div className="inline-block animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent mr-2"></div>
+                Predicting All...
+              </>
+            ) : (
+              'Run for All Dispatchers'
+            )}
+          </button>
+
         </div>
       </div>
 
@@ -2662,6 +2827,94 @@ opacity: (!analysisCompleted || buildingModels || !filters.databaseName || !filt
     </div>
   </div>
 )}
+
+      {/* Model Diagnostics */}
+      {modelDiagnostics.results && (
+        <div className="bg-white border-2 border-purple-200 rounded-lg p-6">
+          <h3 className="text-lg font-semibold text-purple-800 mb-4">
+            Model Diagnostics for {modelDiagnostics.results.dispatcher}
+          </h3>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="bg-gray-50 p-4 rounded-lg">
+              <div className="text-sm text-gray-600">Model Order (p,d,q)</div>
+              <div className="text-lg font-bold text-gray-800">
+                {JSON.stringify(modelDiagnostics.results.model_order)}
+              </div>
+            </div>
+            <div className="bg-gray-50 p-4 rounded-lg">
+              <div className="text-sm text-gray-600">Seasonal Order (P,D,Q,s)</div>
+              <div className="text-lg font-bold text-gray-800">
+                {JSON.stringify(modelDiagnostics.results.seasonal_order)}
+              </div>
+            </div>
+            <div className="bg-gray-50 p-4 rounded-lg">
+              <div className="text-sm text-gray-600">AIC Score</div>
+              <div className="text-lg font-bold text-gray-800">{modelDiagnostics.results.aic_score}</div>
+            </div>
+            <div className="bg-gray-50 p-4 rounded-lg">
+              <div className="text-sm text-gray-600">Log-Likelihood</div>
+              <div className="text-lg font-bold text-gray-800">{modelDiagnostics.results.log_likelihood}</div>
+            </div>
+            <div className="bg-gray-50 p-4 rounded-lg">
+              <div className="text-sm text-gray-600">Training Periods (weeks)</div>
+              <div className="text-lg font-bold text-gray-800">{modelDiagnostics.results.training_periods}</div>
+            </div>
+            <div className="bg-gray-50 p-4 rounded-lg">
+              <div className="text-sm text-gray-600">Data Range</div>
+              <div className="text-sm font-medium text-gray-800">
+                {modelDiagnostics.results.data_range?.start} to {modelDiagnostics.results.data_range?.end}
+              </div>
+            </div>
+            <div className="bg-gray-50 p-4 rounded-lg">
+              <div className="text-sm text-gray-600">Score Mean / Std</div>
+              <div className="text-lg font-bold text-gray-800">
+                {modelDiagnostics.results.performance_stats?.mean} / {modelDiagnostics.results.performance_stats?.std}
+              </div>
+            </div>
+            <div className="bg-gray-50 p-4 rounded-lg">
+              <div className="text-sm text-gray-600">Score Min / Max</div>
+              <div className="text-lg font-bold text-gray-800">
+                {modelDiagnostics.results.performance_stats?.min} / {modelDiagnostics.results.performance_stats?.max}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Seasonal Decomposition */}
+      {seasonalDecomposition.results && (
+        <div className="bg-white border-2 border-cyan-200 rounded-lg p-6">
+          <h3 className="text-lg font-semibold text-cyan-800 mb-4">
+            Seasonal Decomposition for {seasonalDecomposition.results.dispatcher}
+            <span className="text-sm font-normal text-gray-500 ml-2">
+              ({seasonalDecomposition.results.seasonal_period_weeks}-week cycle)
+            </span>
+          </h3>
+          <div style={{ width: '100%', height: 300 }}>
+            <ResponsiveContainer>
+              <LineChart
+                data={seasonalDecomposition.results.dates.map((dateStr, i) => ({
+                  date: dateStr,
+                  observed: seasonalDecomposition.results.observed[i],
+                  trend: seasonalDecomposition.results.trend[i],
+                  seasonal: seasonalDecomposition.results.seasonal[i],
+                  residual: seasonalDecomposition.results.residual[i],
+                }))}
+              >
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="date" tick={{ fontSize: 10 }} />
+                <YAxis />
+                <Tooltip />
+                <Legend />
+                <Line type="monotone" dataKey="observed" stroke="#6B7280" dot={false} />
+                <Line type="monotone" dataKey="trend" stroke="#7C3AED" dot={false} />
+                <Line type="monotone" dataKey="seasonal" stroke="#0891B2" dot={false} />
+                <Line type="monotone" dataKey="residual" stroke="#DC2626" dot={false} />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      )}
 
       {/* Bulk Results */}
       {bulkPrediction.results && Object.keys(bulkPrediction.results).length > 0 && (
