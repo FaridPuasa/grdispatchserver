@@ -41,7 +41,10 @@ def parse_dt(value):
         return None
     dt = value if isinstance(value, datetime) else datetime.fromisoformat(value)
     if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
+        # Upstream history entries with no UTC offset are already Brunei
+        # local wall-clock time (confirmed against timestamps that still
+        # carry an explicit +08:00/+00:00 offset), not UTC.
+        dt = dt.replace(tzinfo=BRUNEI_TZ)
     return dt
 
 
