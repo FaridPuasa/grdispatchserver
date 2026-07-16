@@ -35,6 +35,8 @@ COMPLETED_STATUS = "Completed"
 AT_WAREHOUSE_STATUS = "At Warehouse"
 OUT_FOR_DELIVERY_STATUS = "Out for Delivery"
 
+EXCLUDED_DISPATCHERS = {"N/A", "Unassigned", None, ""}
+
 
 def parse_dt(value):
     if not value:
@@ -171,7 +173,9 @@ def compute_completion_gaps(orders):
 def compute_area_distribution(orders):
     counts = defaultdict(int)
     for order in orders:
-        area = order.get("area") or "N/A"
+        area = order.get("area")
+        if not area or area == "N/A":
+            continue
         counts[area] += 1
     return dict(counts)
 
@@ -300,6 +304,8 @@ def compute_productivity(orders, period_days):
     by_dispatcher = defaultdict(list)
     for order in orders:
         dispatcher = order.get("assignedTo") or "Unassigned"
+        if dispatcher in EXCLUDED_DISPATCHERS:
+            continue
         by_dispatcher[dispatcher].append(order)
 
     result = {

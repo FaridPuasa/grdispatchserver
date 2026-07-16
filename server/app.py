@@ -18,7 +18,7 @@ from auth import (
     verify_password,
 )
 from db import get_client, get_collection
-from metrics import compute_productivity, parse_dt
+from metrics import EXCLUDED_DISPATCHERS, compute_productivity, parse_dt
 from forecasting import (
     build_weekly_productivity,
     check_dispatcher_model,
@@ -31,7 +31,6 @@ from report import generate_report_pdf
 from jobs import start_job, get_job
 
 DEFAULT_DAILY_CAPACITY = 130
-EXCLUDED_DISPATCHERS = {"N/A", "Unassigned", None, ""}
 WAREHOUSE_STATUSES = {"At Warehouse", "Return to Warehouse"}
 WAREHOUSE_ENTRY_WINDOW_DAYS = 30
 
